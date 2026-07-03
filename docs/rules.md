@@ -322,10 +322,32 @@ def test_a():
 
 `assert a == b` (or `assertEqual`) where an operand is a float literal with a
 fractional part, a true-division result, or a `math`/`np` call that produces a
-float is comparing IEEE-754 values for exact equality — the classic source of
+float is comparing IEEE-754 values for exact equality -- the classic source of
 "passes on my machine, fails on CI" flakiness once either side has gone
 through any arithmetic (accumulated rounding, differing libm/BLAS builds,
 platform FMA differences). Fix: `math.isclose`/`pytest.approx`/`np.isclose`.
+
+Local dataflow (function-local type inference lite): the dominant real-world
+shape is `x = compute(); y = other(); assert x == y`, where neither operand is
+itself a literal/division/call at the compare site. To catch this without a
+general-purpose dataflow pass, each function/method scope is scanned once,
+top-to-bottom, tracking which local names currently hold a float-producing
+value (a fractional literal, a division result, a float-producing math/np
+call, or another already-tracked float name). Any other assignment to a name
+-- including reassignment to a non-float expression, tuple unpacking, or a
+for/with/except target -- clears it. This is deliberately shallow: single-
+target `name = expr` only, no branch-sensitivity, no cross-function tracking
+(mirrors `_simple_assigns` in `m1_unseeded_stochastic_assert.py`). A finding
+sourced *only* from this inference (neither side has direct literal/division/
+call evidence) is reported at MEDIUM, not HIGH -- static tracking can't be as
+certain as seeing the literal/call at the compare site itself (tier honesty).
+
+Constant-fold guard: `assert 0.1 + 0.2 == 0.3` is fully static -- both sides
+are constant expressions (literals and +/-/*//%/** on them), so the result
+never varies between runs. It is still flagged (the representation bug is
+real: `0.1 + 0.2 != 0.3` in IEEE-754), but at MEDIUM with a message noting the
+expression is constant, since the "flaky across runs/platforms" framing that
+justifies HIGH doesn't apply to a value that is the same every time.
 
 **Bad:**
 

@@ -7,7 +7,7 @@ by hand; regenerate instead:
 .venv/bin/python scripts/gen_rules_doc.py --write
 ```
 
-17 rules today: `G1`–`G12` general Python flakiness causes (ranked by measured frequency in a 22k-project study), `M1`–`M5` the ML pack (JAX/PyTorch/NumPy-aware). Every finding prints its `[ID/tier]`, cause, and a `fix:` suggestion inline. Check here (and open PRs) before claiming a new rule ID — see [CONTRIBUTING.md](../CONTRIBUTING.md).
+17 rules today: `G1`–`G12` general Python flakiness causes, `M1`–`M5` the ML pack (JAX/PyTorch/NumPy-aware). Every finding prints its `[ID/tier]`, cause, and a `fix:` suggestion inline. Check here (and open PRs) before claiming a new rule ID — see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | ID | Rule | Tier | Cause |
 |---|---|---|---|
@@ -48,7 +48,7 @@ def test_a():
     torch.manual_seed(0)
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import numpy as np
@@ -81,7 +81,7 @@ def test_a():
     assert list(set(x)) == [1, 2, 3]
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import os
@@ -117,7 +117,7 @@ def test_worker_processes_item(worker):
     assert worker.processed == 1
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import time, asyncio
@@ -162,7 +162,7 @@ def test_completes_quickly():
     assert elapsed < 1.0
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import freezegun
@@ -205,7 +205,7 @@ def config():
     return {"a": 1}
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import pytest
@@ -246,7 +246,7 @@ def test_a():
     pass
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import pytest
@@ -290,7 +290,7 @@ def test_a():
     assert resp.status_code == 200
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import requests
@@ -325,7 +325,7 @@ def test_a():
     assert result == 3.14
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import pytest
@@ -367,7 +367,7 @@ def test_a():
     os.makedirs('/tmp/strategy_tests', exist_ok=True)
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 def test_a(tmp_path):
@@ -404,7 +404,7 @@ def test_a():
     loop.run_until_complete(work())
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import asyncio
@@ -449,7 +449,7 @@ def test_leak():
     t.start()
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 from concurrent.futures import ThreadPoolExecutor
@@ -496,7 +496,7 @@ def test_a():
     os.environ["JAX_DISABLE_JIT"] = "1"
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 def test_a(monkeypatch):
@@ -537,7 +537,7 @@ def test_a():
     np.testing.assert_allclose(x, [0.1, 0.2, 0.3, 0.4, 0.5])
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import numpy as np
@@ -597,7 +597,7 @@ def test_a():
     return jax.random.normal(key, (3,))
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import jax
@@ -644,7 +644,7 @@ def test_a():
     np.testing.assert_allclose(model.predict(x), expected, atol=1e-8)
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import numpy as np
@@ -697,7 +697,7 @@ def test_a():
     model.cuda()
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import torch
@@ -743,7 +743,7 @@ def test_step():
     assert _step(1) == 2
 ```
 
-**Good:**
+**Does not trigger:**
 
 ```python
 import jax

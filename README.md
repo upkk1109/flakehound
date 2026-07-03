@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo.svg">
-    <img src="docs/assets/logo.svg" alt="flakehound" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/pctablet505/flakehound/main/docs/assets/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/pctablet505/flakehound/main/docs/assets/logo.svg">
+    <img src="https://raw.githubusercontent.com/pctablet505/flakehound/main/docs/assets/logo.svg" alt="flakehound" width="140">
   </picture>
 </p>
 
@@ -21,8 +21,11 @@ with first-class awareness of <b>ML test flakiness</b> (JAX · PyTorch · NumPy)
 
 ---
 
-Flaky tests — tests that pass and fail on the same code — cause **13% of failing CI builds**
-(Travis-scale study; **26%** at Microsoft). Every existing answer is either *retry harder*
+Flaky tests — tests that pass and fail on the same code — are expensive and common: about
+**13% of failing builds** in a 61-project study of Travis CI Java projects were caused by
+flaky tests ([Labuschagne et al., 2017](#references)), and an internal Microsoft study found
+**26% of tests** in a large industrial suite exhibited flaky behavior
+([Lam et al., ISSTA 2019](#references)). Every existing answer is either *retry harder*
 (`pytest-rerunfailures`, `flaky`) or a *paid cloud dashboard* that notices flakiness only after
 it has already burned your CI for weeks. Nothing predicts, nothing diagnoses, and nothing
 understands why **ML test suites** flake (seeds, tolerances, GPU nondeterminism).
@@ -32,15 +35,16 @@ understands why **ML test suites** flake (seeds, tolerances, GPU nondeterminism)
 - 🔎 **Predict** — an AST rule corpus flags flaky-*prone* patterns at pre-commit time, before
   the first flake: global seed mutation, unordered-collection asserts, unfrozen `datetime.now()`,
   un-mocked network calls, leaked threads, shared-state fixtures, and more.
-- 🧪 **The ML wedge** — the only tool that knows `assert_allclose(atol=1e-8)` on a stochastic
-  model output is a time bomb, that a reused JAX `PRNGKey` breaks test independence, and that
-  your GPU test needs `torch.use_deterministic_algorithms(True)`.
+- 🧪 **The ML wedge** — a static rule pack tuned for ML numeric and RNG patterns
+  (JAX/PyTorch/NumPy): tight `assert_allclose(atol=1e-8)` tolerances on stochastic model
+  output, reused JAX `PRNGKey`s that break test independence, and missing
+  `torch.use_deterministic_algorithms(True)` on GPU tests.
 - 🩺 **Diagnose, don't just retry** — every finding carries a root cause and a concrete fix
   suggestion (e.g. "mutates global RNG state; use a local generator instead").
 - 📈 **Score (coming in v0.2)** — a pytest plugin will log every outcome to a **local SQLite**
   history (no cloud, no account) and compute per-test flakiness scores from flip-rate, recency,
   duration variance, and failure entropy, ranking tests with evidence (e.g. "fails only under
-  3 of 40 pytest-randomly seeds → order-dependent"). Today the plugin adds a one-line summary;
+  3 of 40 pytest-randomly seeds → order-dependent"). Today the plugin adds a terminal summary;
   see [Roadmap](#roadmap).
 
 ## Quickstart
@@ -60,11 +64,14 @@ Example output:
 ```
 tests/test_model.py:41:4: [G1/high] `np.random.seed(...)` mutates global RNG state; test outcomes now depend on execution order
     fix: use a local generator: `rng = np.random.default_rng(seed)` ...
-tests/test_infer.py:88:8: [M3/medium] atol=1e-8 on stochastic model output is tighter than the output's observed variance
-    fix: derive the bound from the output distribution (see FLEX, FSE'21) ...
+tests/test_infer.py:88:8: [M3/advisory] `atol=1e-08` on a value derived from `model.predict(...)` is machine-precision tight; stochastic/float32 model outputs routinely disagree by more than this run-to-run
+    fix: justify this bound or derive it from an observed distribution of repeated runs (FLEX FSE-21) ...
 ```
 
 ### Pre-commit
+
+`rev` must match a released git tag (tags are cut together with the corresponding
+GitHub Release) — it will not resolve before that tag exists.
 
 ```yaml
 repos:
@@ -84,10 +91,13 @@ repos:
 | Local-first / no cloud | ✅ | ❌ | ✅ static scan, no server (SQLite history in v0.2) |
 | Price | free | $0–499/mo | free, Apache-2.0 |
 
+<sup>Competitor names, features, and pricing as of July 2026 — verify against each
+vendor's own site before relying on them; see [References](#references).</sup>
+
 ## Rules
 
 Run `flakehound scan --help` for the toggles. Current corpus: `G1–G12` (general Python
-flakiness causes, ranked by measured frequency in a 22k-project study) + `M1–M5` (the ML pack).
+flakiness causes) + `M1–M5` (the ML pack).
 
 | ID | Rule | ID | Rule |
 |---|---|---|---|
@@ -132,6 +142,24 @@ Rules are tiny, self-contained, and *very* contributable — one module + a true
 fixture + a false-positive guard. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [`good first issue`](https://github.com/pctablet505/flakehound/labels/good%20first%20issue)
 label. If your team fought a flaky pattern we don't catch, we want the rule.
+
+## References
+
+- Labuschagne, A., Inozemtseva, L., & Holmes, R. (2017). *Measuring the cost of regression
+  testing in practice: a study of Java projects using continuous integration.* ESEC/FSE 2017.
+  [doi:10.1145/3106237.3106288](https://doi.org/10.1145/3106237.3106288) — source of the ~13%
+  failing-builds-due-to-flakiness figure (935 builds, 61 Travis CI Java projects).
+- Lam, W., Godefroid, P., Nath, S., Santhiar, A., & Thummalapenta, S. (2019). *Root causing
+  flaky tests in a large-scale industrial setting.* ISSTA 2019.
+  [doi:10.1145/3293882.3330570](https://doi.org/10.1145/3293882.3330570) — source of the ~26%
+  flaky-test figure at Microsoft.
+- Parry, O., Kapfhammer, G. M., Hilton, M., & McMinn, P. (2021). *A survey of flaky tests.*
+  ACM Transactions on Software Engineering and Methodology, 31(1).
+  [doi:10.1145/3476105](https://doi.org/10.1145/3476105) — background survey covering causes,
+  detection, and mitigation across the flaky-test literature.
+
+Competitor names/pricing in the comparison table above are not independently cited here;
+verify current features and pricing directly with each vendor.
 
 ## License
 

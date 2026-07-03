@@ -26,7 +26,7 @@ pytest-core reviewer merge this?"
 ruff check src tests && ruff format --check src tests
 pyright src
 pytest -p randomly -q
-flakehound scan tests/            # dogfood: our own tests stay clean (fixtures excluded)
+flakehound scan tests/ --fail-on high   # dogfood: our own tests stay clean (fixtures excluded, matches CI)
 ```
 
 Fail-before/pass-after: a bugfix commit must contain the test that fails without it.

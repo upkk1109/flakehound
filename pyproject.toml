@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flakehound"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Hunt flaky tests before they bite: static flaky-pattern detection + local run-history scoring for pytest, with ML-testing awareness (JAX/PyTorch/NumPy)."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "Rahul Kumar", email = "pctablet505@gmail.com" }]
 keywords = [
     "pytest", "flaky", "flaky-tests", "testing", "ci", "test-reliability",
@@ -18,7 +18,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Pytest",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -56,6 +55,9 @@ flakehound = "flakehound.plugin"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = { attr = "flakehound.__version__" }
+
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
@@ -82,4 +84,4 @@ norecursedirs = ["tests/fixtures"]
 # flakehound's own config (dogfood). All rules on by default.
 # disable = ["G3"]
 # fail_on = "high"        # high | medium | advisory | never
-# exclude = ["tests/fixtures/*"]
+exclude = ["tests/fixtures/*"]

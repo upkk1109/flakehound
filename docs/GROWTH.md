@@ -5,10 +5,10 @@ Every phase below has a trigger condition tied to `PLAN-flakehound-v1.md`'s mile
 Don't skip ahead: a Show HN post against an empty rule corpus burns the launch slot you
 only get once per domain.
 
-**Status right now:** M1 in progress (`G1` shipped, `G2`–`G12` pending). Nothing in
-"Launch sequence" below is actionable until the M4 gate (IDoFT/FlaPy benchmarks) passes.
-"Credibility assets" and "Contribution flywheel" *are* actionable now — do those first,
-they make the eventual launch land harder.
+**Status right now:** v0.1.0 corpus shipped (`G1`–`G12`, `M1`–`M5`). Launch sequence is
+unblocked pending the FIX-FIRST wave (see the pre-release review) and the M4 gate
+(IDoFT/FlaPy benchmarks in `docs/benchmarks.md`). "Credibility assets" and "Contribution
+flywheel" are actionable now — do those first, they make the eventual launch land harder.
 
 ## Positioning
 

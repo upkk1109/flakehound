@@ -78,11 +78,10 @@ def render(rule_classes: list[type]) -> str:
         ".venv/bin/python scripts/gen_rules_doc.py --write",
         "```",
         "",
-        f"{len(rule_classes)} rules today: `G1`–`G12` general Python flakiness causes "
-        "(ranked by measured frequency in a 22k-project study), `M1`–`M5` the ML pack "
-        "(JAX/PyTorch/NumPy-aware). Every finding prints its `[ID/tier]`, cause, and a `fix:` "
-        "suggestion inline. Check here (and open PRs) before claiming a new rule ID — see "
-        "[CONTRIBUTING.md](../CONTRIBUTING.md).",
+        f"{len(rule_classes)} rules today: `G1`–`G12` general Python flakiness causes, "
+        "`M1`–`M5` the ML pack (JAX/PyTorch/NumPy-aware). Every finding prints its "
+        "`[ID/tier]`, cause, and a `fix:` suggestion inline. Check here (and open PRs) "
+        "before claiming a new rule ID — see [CONTRIBUTING.md](../CONTRIBUTING.md).",
         "",
         "| ID | Rule | Tier | Cause |",
         "|---|---|---|---|",
@@ -113,7 +112,7 @@ def render(rule_classes: list[type]) -> str:
             "",
             _fence(bad),
             "",
-            "**Good:**",
+            "**Does not trigger:**",
             "",
             _fence(good),
             "",

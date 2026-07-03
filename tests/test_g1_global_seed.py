@@ -47,3 +47,51 @@ def test_fp_guard_local_generator_is_clean():
 def test_fp_guard_unrelated_seed_method_on_object():
     src = "def test_a(planter):\n    planter.seed(3)\n"
     assert _run(src) == []
+
+
+# --- import-alias resolution (pack D1) ----------------------------------------
+
+
+def test_detects_aliased_submodule_import():
+    src = "import numpy.random as nr\n\ndef test_a():\n    nr.seed(0)\n"
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "G1"
+    assert findings[0].line == 4
+
+
+def test_detects_aliased_from_import_call():
+    src = "from torch import manual_seed as ms\n\ndef test_a():\n    ms(0)\n"
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "G1"
+    assert findings[0].line == 4
+
+
+def test_detects_bare_from_import_call():
+    src = "from torch import manual_seed\n\ndef test_a():\n    manual_seed(0)\n"
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].line == 4
+
+
+def test_fp_guard_aliased_import_unchanged_planter():
+    """Alias resolution must not turn unrelated names into false matches."""
+    src = "import numpy.random as nr\n\ndef test_a(planter):\n    planter.seed(3)\n"
+    assert _run(src) == []
+
+
+def test_fp_guard_local_function_named_manual_seed_does_not_fire():
+    """A locally-defined `manual_seed` (no import at all) must not be treated as
+    torch's global-seed mutator -- it's an unrelated function that happens to
+    share a name."""
+    src = "def manual_seed(x):\n    return x + 1\n\ndef test_a():\n    assert manual_seed(1) == 2\n"
+    assert _run(src) == []
+
+
+def test_fp_guard_endswith_random_no_longer_matches_arbitrary_local():
+    """`my_random` merely ends with 'random' but is not a known RNG module --
+    the old `str.endswith('random')` fallback used to false-positive here
+    (review low #42); the restricted allowlist must not."""
+    src = "def test_a(my_random):\n    my_random.seed(1)\n"
+    assert _run(src) == []

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable
 
+from flakehound.rules._imports import build_alias_map, resolve_call
 from flakehound.rules.base import Confidence, FileContext, Finding, Rule, register
 
 _SEED_CALLS = {
@@ -21,16 +22,11 @@ _SEED_CALLS = {
     ("tf.random", "set_seed"),
 }
 
-
-def _dotted(node: ast.AST) -> str | None:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return ".".join(reversed(parts))
-    return None
+# Known RNG module prefixes for the generic "<module>.seed(...)" fallback below.
+# Deliberately an exact-match allowlist, not a `str.endswith("random")` check:
+# the substring check false-positived on unrelated locals like `my_random.seed(1)`
+# (review low #42).
+_RNG_MODULE_PREFIXES = {"random", "np.random", "numpy.random", "jax.random", "cupy.random"}
 
 
 @register
@@ -46,14 +42,15 @@ class GlobalSeedMutation(Rule):
     )
 
     def check(self, ctx: FileContext) -> Iterable[Finding]:
+        aliases = build_alias_map(ctx.tree)
         for node in ast.walk(ctx.tree):
             if not isinstance(node, ast.Call):
                 continue
-            dotted = _dotted(node.func)
+            dotted = resolve_call(node, aliases)
             if dotted is None or "." not in dotted:
                 continue
             prefix, _, attr = dotted.rpartition(".")
-            if (prefix, attr) in _SEED_CALLS or (attr == "seed" and prefix.endswith("random")):
+            if (prefix, attr) in _SEED_CALLS or (attr == "seed" and prefix in _RNG_MODULE_PREFIXES):
                 yield self.finding(
                     ctx,
                     node,

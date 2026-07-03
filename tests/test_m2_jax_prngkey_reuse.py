@@ -184,3 +184,49 @@ def test_fp_guard_plain_int_seed_is_clean():
         "    return jax.random.normal(key, (3,))\n"
     )
     assert _run(src) == []
+
+
+# --- import-alias resolution (pack D1) ------------------------------------------
+
+
+def test_detects_key_reused_via_jax_random_alias():
+    src = (
+        "import jax.random as jr\n"
+        "\n"
+        "def test_two_draws():\n"
+        "    key = jr.PRNGKey(0)\n"
+        "    a = jr.normal(key, (3,))\n"
+        "    b = jr.uniform(key, (3,))\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "M2"
+    assert findings[0].confidence == Confidence.HIGH
+    assert findings[0].line == 6
+
+
+def test_detects_hash_seeded_key_via_from_import_alias():
+    src = (
+        "from jax import random as jr\n"
+        "\n"
+        "def test_a():\n"
+        '    key = jr.PRNGKey(hash("some-run-id"))\n'
+        "    return jr.normal(key, (3,))\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].confidence == Confidence.HIGH
+    assert findings[0].line == 4
+
+
+def test_fp_guard_split_before_reuse_is_clean_via_alias():
+    src = (
+        "import jax.random as jr\n"
+        "\n"
+        "def test_split_then_use():\n"
+        "    key = jr.PRNGKey(0)\n"
+        "    k1, k2 = jr.split(key)\n"
+        "    a = jr.normal(k1, (3,))\n"
+        "    b = jr.uniform(k2, (3,))\n"
+    )
+    assert _run(src) == []

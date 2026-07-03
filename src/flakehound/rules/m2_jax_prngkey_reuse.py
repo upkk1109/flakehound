@@ -35,21 +35,11 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable
 
+from flakehound.rules._imports import build_alias_map, resolve_call
 from flakehound.rules.base import Confidence, FileContext, Finding, Rule, register
 
 _DERIVING_ATTRS = {"split", "fold_in"}
 _CONSTRUCTOR_ATTRS = {"PRNGKey"}
-
-
-def _dotted(node: ast.AST) -> str | None:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return ".".join(reversed(parts))
-    return None
 
 
 def _is_prngkey_call(dotted: str) -> bool:
@@ -127,18 +117,20 @@ def _iter_stmts(body: list[ast.stmt]) -> Iterable[ast.stmt]:
             yield from _iter_stmts(stmt.finalbody)
 
 
-def _derives_new_key(stmt: ast.stmt) -> list[str] | None:
+def _derives_new_key(stmt: ast.stmt, aliases: dict[str, str]) -> list[str] | None:
     """If `stmt` is `<target(s)> = PRNGKey(...)` or `<target(s)> = split/fold_in(...)`,
     return the freshly-bound target names (new, unconsumed key material)."""
     if not isinstance(stmt, ast.Assign) or not isinstance(stmt.value, ast.Call):
         return None
-    dotted = _dotted(stmt.value.func)
+    dotted = resolve_call(stmt.value, aliases)
     if dotted and (_is_prngkey_call(dotted) or _split_kind(dotted) is not None):
         return _assign_target_names(stmt.targets)
     return None
 
 
-def _directly_consumes(func: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
+def _directly_consumes(
+    func: ast.FunctionDef | ast.AsyncFunctionDef, name: str, aliases: dict[str, str]
+) -> bool:
     """True if `func` passes the raw variable `name` into a consuming `jax.random.*`
     call without ever deriving a fresh key from it via `split`/`fold_in` first."""
     derived = False
@@ -146,7 +138,7 @@ def _directly_consumes(func: ast.FunctionDef | ast.AsyncFunctionDef, name: str) 
     for node in ast.walk(func):
         if not isinstance(node, ast.Call):
             continue
-        dotted = _dotted(node.func)
+        dotted = resolve_call(node, aliases)
         if not dotted:
             continue
         if _split_kind(dotted) is not None:
@@ -172,17 +164,18 @@ class PRNGKeyReuse(Rule):
     )
 
     def check(self, ctx: FileContext) -> Iterable[Finding]:
-        yield from self._check_hash_seeded(ctx)
+        aliases = build_alias_map(ctx.tree)
+        yield from self._check_hash_seeded(ctx, aliases)
         for func in ast.walk(ctx.tree):
             if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                yield from self._check_function_reuse(ctx, func)
-        yield from self._check_module_scope_reuse(ctx)
+                yield from self._check_function_reuse(ctx, func, aliases)
+        yield from self._check_module_scope_reuse(ctx, aliases)
 
-    def _check_hash_seeded(self, ctx: FileContext) -> Iterable[Finding]:
+    def _check_hash_seeded(self, ctx: FileContext, aliases: dict[str, str]) -> Iterable[Finding]:
         for node in ast.walk(ctx.tree):
             if not isinstance(node, ast.Call):
                 continue
-            dotted = _dotted(node.func)
+            dotted = resolve_call(node, aliases)
             if dotted is None or not _is_prngkey_call(dotted):
                 continue
             exprs = [*node.args, *(kw.value for kw in node.keywords)]
@@ -197,11 +190,14 @@ class PRNGKeyReuse(Rule):
                 )
 
     def _check_function_reuse(
-        self, ctx: FileContext, func: ast.FunctionDef | ast.AsyncFunctionDef
+        self,
+        ctx: FileContext,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        aliases: dict[str, str],
     ) -> Iterable[Finding]:
         consumed: set[str] = set()
         for stmt in _iter_stmts(func.body):
-            fresh = _derives_new_key(stmt)
+            fresh = _derives_new_key(stmt, aliases)
             if fresh is not None:
                 for name in fresh:
                     consumed.discard(name)
@@ -209,7 +205,7 @@ class PRNGKeyReuse(Rule):
             for node in ast.walk(stmt):
                 if not isinstance(node, ast.Call):
                     continue
-                dotted = _dotted(node.func)
+                dotted = resolve_call(node, aliases)
                 if not dotted or not _is_consuming_random_call(dotted):
                     continue
                 name = _key_arg_name(node)
@@ -226,12 +222,14 @@ class PRNGKeyReuse(Rule):
                 else:
                     consumed.add(name)
 
-    def _check_module_scope_reuse(self, ctx: FileContext) -> Iterable[Finding]:
+    def _check_module_scope_reuse(
+        self, ctx: FileContext, aliases: dict[str, str]
+    ) -> Iterable[Finding]:
         module_keys: dict[str, ast.stmt] = {}
         for stmt in ctx.tree.body:
-            fresh = _derives_new_key(stmt)
+            fresh = _derives_new_key(stmt, aliases)
             if fresh and isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
-                dotted = _dotted(stmt.value.func)
+                dotted = resolve_call(stmt.value, aliases)
                 if dotted and _is_prngkey_call(dotted):
                     for name in fresh:
                         module_keys[name] = stmt
@@ -245,7 +243,7 @@ class PRNGKeyReuse(Rule):
         ]
 
         for name, origin in module_keys.items():
-            direct_users = [f.name for f in test_funcs if _directly_consumes(f, name)]
+            direct_users = [f.name for f in test_funcs if _directly_consumes(f, name, aliases)]
             if len(direct_users) < 2:
                 continue
             yield self.finding(

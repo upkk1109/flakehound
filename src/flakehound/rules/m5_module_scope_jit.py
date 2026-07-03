@@ -18,26 +18,30 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable
 
+from flakehound.rules._imports import build_alias_map, resolve_call, resolve_expr
 from flakehound.rules.base import Confidence, FileContext, Finding, Rule, register
 
 _CACHING_SCOPES = {"module", "session"}
 
 
-def _dotted(node: ast.AST) -> str | None:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-        return ".".join(reversed(parts))
-    return None
-
-
-def _is_jax_jit(node: ast.expr) -> bool:
-    """`jax.jit` used bare (`@jax.jit`) or called (`jax.jit(...)`)."""
+def _is_jax_jit(node: ast.expr, aliases: dict[str, str]) -> bool:
+    """`jax.jit` used bare (`@jax.jit`) or called (`jax.jit(...)`), alias-resolved
+    so `from jax import jit; @jit` and `import jax.numpy as ...`-style aliasing of
+    `jax` itself also match."""
     target = node.func if isinstance(node, ast.Call) else node
-    return _dotted(target) == "jax.jit"
+    return resolve_expr(target, aliases) == "jax.jit"
+
+
+def _wraps_jax_jit_via_partial(node: ast.expr, aliases: dict[str, str]) -> bool:
+    """True for `functools.partial(jax.jit, ...)` (any alias of either name), used
+    as a decorator: `@functools.partial(jax.jit, static_argnums=0)`."""
+    if not isinstance(node, ast.Call):
+        return False
+    if resolve_call(node, aliases) != "functools.partial":
+        return False
+    if not node.args:
+        return False
+    return resolve_expr(node.args[0], aliases) == "jax.jit"
 
 
 def _decorator_name(dec: ast.expr) -> str | None:
@@ -96,11 +100,12 @@ class ModuleScopeJit(Rule):
     )
 
     def check(self, ctx: FileContext) -> Iterable[Finding]:
+        aliases = build_alias_map(ctx.tree)
         if ctx.is_test_file:
-            yield from self._check_module_level(ctx)
-        yield from self._check_fixtures(ctx)
+            yield from self._check_module_level(ctx, aliases)
+        yield from self._check_fixtures(ctx, aliases)
 
-    def _check_module_level(self, ctx: FileContext) -> Iterable[Finding]:
+    def _check_module_level(self, ctx: FileContext, aliases: dict[str, str]) -> Iterable[Finding]:
         """`@jax.jit` / `NAME = jax.jit(...)` as a top-level module statement.
 
         Only the module's own top-level body is scanned — anything nested inside a
@@ -109,26 +114,40 @@ class ModuleScopeJit(Rule):
         """
         for stmt in ctx.tree.body:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                yield from self._check_module_level_def(ctx, stmt)
+                yield from self._check_module_level_def(ctx, stmt, aliases)
             elif isinstance(stmt, ast.Assign):
-                yield from self._check_module_level_assign(ctx, stmt)
+                yield from self._check_module_level_assign(ctx, stmt, aliases)
 
     def _check_module_level_def(
-        self, ctx: FileContext, stmt: ast.FunctionDef | ast.AsyncFunctionDef
+        self,
+        ctx: FileContext,
+        stmt: ast.FunctionDef | ast.AsyncFunctionDef,
+        aliases: dict[str, str],
     ) -> Iterable[Finding]:
         for dec in stmt.decorator_list:
-            if _is_jax_jit(dec):
-                yield self.finding(
-                    ctx,
-                    dec,
-                    f"`{stmt.name}` is compiled with `@jax.jit` at module scope; "
-                    "the compiled function is shared by every test in this file "
-                    "for the life of the test session",
-                )
-                return
+            if _is_jax_jit(dec, aliases):
+                label = "@jax.jit"
+            elif _wraps_jax_jit_via_partial(dec, aliases):
+                # `functools.partial(jax.jit, ...)` used *as a decorator* is
+                # immediately applied to `stmt` by Python's decorator syntax, so
+                # (unlike a bare assignment/fixture return of the same partial)
+                # this always compiles at module import time.
+                label = "@functools.partial(jax.jit, ...)"
+            else:
+                continue
+            yield self.finding(
+                ctx,
+                dec,
+                f"`{stmt.name}` is compiled with `{label}` at module scope; "
+                "the compiled function is shared by every test in this file "
+                "for the life of the test session",
+            )
+            return
 
-    def _check_module_level_assign(self, ctx: FileContext, stmt: ast.Assign) -> Iterable[Finding]:
-        if not isinstance(stmt.value, ast.Call) or not _is_jax_jit(stmt.value):
+    def _check_module_level_assign(
+        self, ctx: FileContext, stmt: ast.Assign, aliases: dict[str, str]
+    ) -> Iterable[Finding]:
+        if not isinstance(stmt.value, ast.Call) or not _is_jax_jit(stmt.value, aliases):
             return
         target = stmt.targets[0]
         name = target.id if isinstance(target, ast.Name) else "<value>"
@@ -140,7 +159,7 @@ class ModuleScopeJit(Rule):
             "life of the test session",
         )
 
-    def _check_fixtures(self, ctx: FileContext) -> Iterable[Finding]:
+    def _check_fixtures(self, ctx: FileContext, aliases: dict[str, str]) -> Iterable[Finding]:
         """A `scope="module"`/`"session"` fixture that manufactures a jitted function.
 
         Not gated on ``is_test_file``: these fixtures commonly live in conftest.py,
@@ -153,7 +172,7 @@ class ModuleScopeJit(Rule):
             if scope not in _CACHING_SCOPES:
                 continue
             for node in _walk_body(func):
-                if isinstance(node, ast.Call) and _is_jax_jit(node):
+                if isinstance(node, ast.Call) and _is_jax_jit(node, aliases):
                     yield self.finding(
                         ctx,
                         node,

@@ -94,6 +94,78 @@ def test_detects_session_scoped_fixture_in_conftest():
     assert findings[0].line == 6
 
 
+# --- import-alias resolution (pack D1) ---------------------------------------
+
+
+def test_detects_from_import_jit_bare_decorator():
+    src = (
+        "from jax import jit\n"
+        "\n"
+        "@jit\n"
+        "def _step(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "def test_step():\n"
+        "    assert _step(1) == 2\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "M5"
+    assert findings[0].line == 3
+
+
+def test_detects_from_import_jit_alias_assignment():
+    src = (
+        "from jax import jit as jj\n"
+        "\n"
+        "def _step_fn(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "stepped = jj(_step_fn)\n"
+        "\n"
+        "def test_stepped():\n"
+        "    assert stepped(1) == 2\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].line == 6
+
+
+def test_detects_functools_partial_jit_decorator():
+    src = (
+        "import functools\n"
+        "import jax\n"
+        "\n"
+        "@functools.partial(jax.jit, static_argnums=0)\n"
+        "def _step(n, x):\n"
+        "    return x + n\n"
+        "\n"
+        "def test_step():\n"
+        "    assert _step(1, 1) == 2\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "M5"
+    assert findings[0].line == 4
+
+
+def test_detects_functools_partial_jit_decorator_via_from_import():
+    src = (
+        "from functools import partial\n"
+        "from jax import jit\n"
+        "\n"
+        "@partial(jit, static_argnums=0)\n"
+        "def _step(n, x):\n"
+        "    return x + n\n"
+        "\n"
+        "def test_step():\n"
+        "    assert _step(1, 1) == 2\n"
+    )
+    findings = _run(src)
+    assert len(findings) == 1
+    assert findings[0].line == 4
+
+
 # --- false-positive guards ---------------------------------------------------
 
 
@@ -157,5 +229,54 @@ def test_fp_guard_class_scoped_fixture_is_clean():
         '@pytest.fixture(scope="class")\n'
         "def jitted_step():\n"
         "    return jax.jit(lambda x: x + 1)\n"
+    )
+    assert _run(src) == []
+
+
+def test_fp_guard_unrelated_partial_is_clean():
+    """`functools.partial` wrapping something other than `jax.jit` must not fire."""
+    src = (
+        "import functools\n"
+        "\n"
+        "def _add(a, b):\n"
+        "    return a + b\n"
+        "\n"
+        "@functools.partial(_add, 1)\n"
+        "def test_a():\n"
+        "    pass\n"
+    )
+    assert _run(src) == []
+
+
+def test_fp_guard_bare_partial_assignment_not_applied_is_clean():
+    """`functools.partial(jax.jit, ...)` stored but never applied to a function
+    has not compiled anything yet -- only the decorator form (immediately
+    applied by Python) should fire."""
+    src = (
+        "import functools\n"
+        "import jax\n"
+        "\n"
+        "make_jitted = functools.partial(jax.jit, static_argnums=0)\n"
+        "\n"
+        "def test_a():\n"
+        "    stepped = make_jitted(lambda n, x: x + n)\n"
+        "    assert stepped(1, 1) == 2\n"
+    )
+    assert _run(src) == []
+
+
+def test_fp_guard_unrelated_jit_named_function_via_alias_is_clean():
+    """A locally-defined `jit` name (no `from jax import jit`) must not be
+    mistaken for jax's jit."""
+    src = (
+        "def jit(fn):\n"
+        "    return fn\n"
+        "\n"
+        "@jit\n"
+        "def _step(x):\n"
+        "    return x + 1\n"
+        "\n"
+        "def test_step():\n"
+        "    assert _step(1) == 2\n"
     )
     assert _run(src) == []

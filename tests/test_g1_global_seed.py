@@ -30,12 +30,7 @@ def test_detects_np_random_seed():
 
 
 def test_detects_stdlib_random_seed_and_torch():
-    src = (
-        "import random, torch\n"
-        "def test_a():\n"
-        "    random.seed(0)\n"
-        "    torch.manual_seed(0)\n"
-    )
+    src = "import random, torch\ndef test_a():\n    random.seed(0)\n    torch.manual_seed(0)\n"
     assert len(_run(src)) == 2
 
 

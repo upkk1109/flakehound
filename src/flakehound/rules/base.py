@@ -12,9 +12,10 @@ Design contract (binding for contributors and agents):
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, ClassVar, Iterable
+from typing import ClassVar
 
 
 class Confidence(str, Enum):
@@ -71,9 +72,14 @@ class Rule:
     def check(self, ctx: FileContext) -> Iterable[Finding]:  # pragma: no cover
         raise NotImplementedError
 
-    def finding(self, ctx: FileContext, node: ast.AST, message: str,
-                fix: str | None = None,
-                confidence: Confidence | None = None) -> Finding:
+    def finding(
+        self,
+        ctx: FileContext,
+        node: ast.AST,
+        message: str,
+        fix: str | None = None,
+        confidence: Confidence | None = None,
+    ) -> Finding:
         return Finding(
             rule_id=self.id,
             rule_name=self.name,
@@ -94,7 +100,9 @@ def register(cls: type[Rule]) -> type[Rule]:
     if not getattr(cls, "id", None):
         raise ValueError(f"Rule {cls.__name__} missing id")
     if cls.id in _REGISTRY:
-        raise ValueError(f"Duplicate rule id {cls.id}: {cls.__name__} vs {_REGISTRY[cls.id].__name__}")
+        raise ValueError(
+            f"Duplicate rule id {cls.id}: {cls.__name__} vs {_REGISTRY[cls.id].__name__}"
+        )
     _REGISTRY[cls.id] = cls
     return cls
 
@@ -106,8 +114,9 @@ def all_rules() -> dict[str, type[Rule]]:
     return dict(_REGISTRY)
 
 
-def make_rules(disabled: frozenset[str] = frozenset(),
-               predicate: Callable[[type[Rule]], bool] | None = None) -> list[Rule]:
+def make_rules(
+    disabled: frozenset[str] = frozenset(), predicate: Callable[[type[Rule]], bool] | None = None
+) -> list[Rule]:
     out: list[Rule] = []
     for rid, cls in sorted(all_rules().items()):
         if rid in disabled:

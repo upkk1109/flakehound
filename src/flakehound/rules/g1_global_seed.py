@@ -8,7 +8,7 @@ cause of order-dependent flakiness in Python suites.
 from __future__ import annotations
 
 import ast
-from typing import Iterable
+from collections.abc import Iterable
 
 from flakehound.rules.base import Confidence, FileContext, Finding, Rule, register
 
@@ -53,9 +53,7 @@ class GlobalSeedMutation(Rule):
             if dotted is None or "." not in dotted:
                 continue
             prefix, _, attr = dotted.rpartition(".")
-            if (prefix, attr) in _SEED_CALLS or (
-                attr == "seed" and prefix.endswith("random")
-            ):
+            if (prefix, attr) in _SEED_CALLS or (attr == "seed" and prefix.endswith("random")):
                 yield self.finding(
                     ctx,
                     node,

@@ -24,8 +24,12 @@ def _build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="statically detect flaky-prone patterns in test code")
     scan.add_argument("paths", nargs="*", default=["."], help="files or directories (default: .)")
     scan.add_argument("--format", choices=["text", "json"], default="text")
-    scan.add_argument("--fail-on", choices=["high", "medium", "advisory", "never"], default=None,
-                      help="minimum confidence tier that causes exit code 1 (default: config or 'high')")
+    scan.add_argument(
+        "--fail-on",
+        choices=["high", "medium", "advisory", "never"],
+        default=None,
+        help="minimum confidence tier that causes exit code 1 (default: config or 'high')",
+    )
     scan.add_argument("--no-ml-rules", action="store_true", help="disable the ML rule pack (M*)")
     scan.add_argument("--disable", action="append", default=[], metavar="RULE_ID")
     return p

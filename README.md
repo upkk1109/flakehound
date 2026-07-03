@@ -102,6 +102,7 @@ flakiness causes, ranked by measured frequency in a 22k-project study) + `M1–M
 | | | M5 | module-scope-jit |
 
 Every finding prints its cause and fix suggestion inline — see the example output above.
+Full catalog with a bad/good example and fix for every rule: [docs/rules.md](docs/rules.md).
 
 Configure in `pyproject.toml`:
 

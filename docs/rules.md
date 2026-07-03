@@ -17,7 +17,7 @@ by hand; regenerate instead:
 | [G4](#g4-naive-now) | `naive-now` | medium | time/wall-clock-nondeterminism |
 | [G5](#g5-shared-state-fixture) | `shared-state-fixture` | medium | shared-state |
 | [G6](#g6-import-time-side-effects) | `import-time-side-effects` | medium | import-time-side-effects/order-dependence |
-| [G7](#g7-unmocked-network) | `unmocked-network` | high | network/infrastructure |
+| [G7](#g7-unmocked-network) | `unmocked-network` | medium | network/infrastructure |
 | [G8](#g8-float-equality-without-tolerance) | `float-equality-without-tolerance` | high | floating-point/precision |
 | [G9](#g9-hardcoded-tmp-paths) | `hardcoded-tmp-paths` | high | filesystem/shared-state |
 | [G10](#g10-event-loop-misuse) | `event-loop-misuse` | medium | concurrency/event-loop-lifecycle |
@@ -266,7 +266,7 @@ def test_a():
 
 *un-mocked network calls in tests.*
 
-**Tier:** `high`  **Cause:** `network/infrastructure`
+**Tier:** `medium`  **Cause:** `network/infrastructure`
 
 A direct `requests`/`httpx`/`urllib`/`socket`/`aiohttp` call in a test body hits a
 live network in CI — DNS hiccups, rate limits, and third-party downtime become test
@@ -279,7 +279,17 @@ plain `monkeypatch`/`unittest.mock.patch` of the callee. Presence of any of thos
 signals anywhere in the file suppresses the whole file — one shared mock/session
 fixture commonly covers every test in it, and this rule is pure `ast` with no
 cross-function dataflow, so it cannot prove a *specific* call site is still unmocked
-once any of those signals exist.
+once any of those signals exist. That file-level suppression heuristic is also why
+this rule's default tier is `MEDIUM`, not `HIGH`: it can show a call site with no
+mocking signal anywhere in the file, but it can never *prove* that specific site is
+unmocked (AGENTS.md tier-honesty contract — HIGH is reserved for near-certain static
+matches).
+
+Chained/session-object calls are matched too: `requests.Session().get(...)`,
+`httpx.Client()`/`AsyncClient()` methods, `aiohttp.ClientSession().get(...)`, and
+`socket.socket(...).connect(...)`, including the two-step form
+(`s = requests.Session(); s.get(...)`) via simple local-name tracking within a file
+— not full dataflow, just "last assignment of this name wins."
 
 **Bad:**
 

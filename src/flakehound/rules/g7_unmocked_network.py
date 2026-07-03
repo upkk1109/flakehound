@@ -11,7 +11,17 @@ plain `monkeypatch`/`unittest.mock.patch` of the callee. Presence of any of thos
 signals anywhere in the file suppresses the whole file — one shared mock/session
 fixture commonly covers every test in it, and this rule is pure `ast` with no
 cross-function dataflow, so it cannot prove a *specific* call site is still unmocked
-once any of those signals exist.
+once any of those signals exist. That file-level suppression heuristic is also why
+this rule's default tier is `MEDIUM`, not `HIGH`: it can show a call site with no
+mocking signal anywhere in the file, but it can never *prove* that specific site is
+unmocked (AGENTS.md tier-honesty contract — HIGH is reserved for near-certain static
+matches).
+
+Chained/session-object calls are matched too: `requests.Session().get(...)`,
+`httpx.Client()`/`AsyncClient()` methods, `aiohttp.ClientSession().get(...)`, and
+`socket.socket(...).connect(...)`, including the two-step form
+(`s = requests.Session(); s.get(...)`) via simple local-name tracking within a file
+— not full dataflow, just "last assignment of this name wins."
 """
 
 from __future__ import annotations
@@ -54,6 +64,27 @@ _MEDIUM_NETWORK_CALLS = {
     ("aiohttp", "ClientSession"),
 }
 
+# Chained/tracked session-object calls: `requests.Session().get(...)`,
+# `s = httpx.Client(); s.get(...)`, `socket.socket(...).connect(...)`. Maps a
+# constructor's dotted name to the "kind" key used to look up its network-facing
+# methods below.
+_SESSION_CONSTRUCTOR_KIND = {
+    "requests.Session": "requests",
+    "httpx.Client": "httpx",
+    "httpx.AsyncClient": "httpx",
+    "aiohttp.ClientSession": "aiohttp",
+    "socket.socket": "socket",
+}
+
+_SESSION_METHODS: dict[str, frozenset[str]] = {
+    "requests": frozenset({"get", "post", "put", "delete", "patch", "head", "options", "request"}),
+    "httpx": frozenset(
+        {"get", "post", "put", "delete", "patch", "head", "options", "request", "stream"}
+    ),
+    "aiohttp": frozenset({"get", "post", "put", "delete", "patch", "head", "options", "request"}),
+    "socket": frozenset({"connect"}),
+}
+
 _MOCK_LIBS = {
     "responses",
     "requests_mock",
@@ -73,6 +104,7 @@ _MOCK_FIXTURE_PARAMS = {
     "localserver",
     "respx_mock",
     "requests_mock",
+    "responses_mock",
     "vcr_cassette",
     "vcr_cassette_dir",
 }
@@ -133,17 +165,6 @@ def _imported_top_level_names(tree: ast.Module) -> set[str]:
     return names
 
 
-def _imports_urlopen(tree: ast.Module) -> bool:
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.module == "urllib.request"
-            and any(alias.name == "urlopen" for alias in node.names)
-        ):
-            return True
-    return False
-
-
 def _has_mock_fixture_params(tree: ast.Module) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -196,12 +217,80 @@ def _has_mock_signals(ctx: FileContext) -> bool:
     return bool(_has_network_patch(tree))
 
 
+def _local_session_vars(tree: ast.Module) -> dict[str, tuple[str, ast.Call]]:
+    """Track `name = <session/socket constructor>()` assignments.
+
+    Simple local-name tracking, not dataflow: one name -> (kind, constructor call)
+    per file, last assignment wins on reassignment. Good enough to catch the common
+    `s = requests.Session(); s.get(...)` two-step form.
+    """
+    mapping: dict[str, tuple[str, ast.Call]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        if not isinstance(node.value, ast.Call):
+            continue
+        kind = _SESSION_CONSTRUCTOR_KIND.get(_dotted(node.value.func) or "")
+        if kind is not None:
+            mapping[node.targets[0].id] = (kind, node.value)
+    return mapping
+
+
+def _chained_session_call(func: ast.expr) -> tuple[str, str, ast.Call] | None:
+    """Match `<ctor>(...).method(...)`, e.g. `requests.Session().get(url)`."""
+    if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Call):
+        return None
+    ctor_call = func.value
+    kind = _SESSION_CONSTRUCTOR_KIND.get(_dotted(ctor_call.func) or "")
+    if kind is None or func.attr not in _SESSION_METHODS[kind]:
+        return None
+    return kind, func.attr, ctor_call
+
+
+def _tracked_session_call(
+    func: ast.expr, local_vars: dict[str, tuple[str, ast.Call]]
+) -> tuple[str, str, ast.Call] | None:
+    """Match `s.method(...)` where `s = <ctor>()` was tracked by `_local_session_vars`."""
+    if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+        return None
+    tracked = local_vars.get(func.value.id)
+    if tracked is None:
+        return None
+    kind, ctor_call = tracked
+    if func.attr not in _SESSION_METHODS[kind]:
+        return None
+    return kind, func.attr, ctor_call
+
+
+def _session_call_matches(
+    tree: ast.Module, local_vars: dict[str, tuple[str, ast.Call]]
+) -> list[tuple[ast.Call, str, str, ast.Call]]:
+    """Every chained or tracked session/socket method call in the file.
+
+    Returns `(call_node, kind, method, ctor_call_node)` tuples. `ctor_call_node` is
+    the constructor call the method was invoked on/through — used by `check()` to
+    suppress the separate "construction only" MEDIUM finding for the same object
+    once there's direct evidence it was actually called.
+    """
+    matches: list[tuple[ast.Call, str, str, ast.Call]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _is_localhost_call(node):
+            continue
+        match = _chained_session_call(node.func) or _tracked_session_call(node.func, local_vars)
+        if match is not None:
+            kind, method, ctor_call = match
+            matches.append((node, kind, method, ctor_call))
+    return matches
+
+
 @register
 class UnmockedNetworkCall(Rule):
     id = "G7"
     name = "unmocked-network"
     cause = "network/infrastructure"
-    confidence = Confidence.HIGH
+    confidence = Confidence.MEDIUM
     fix_suggestion = (
         "mock the transport boundary — `responses`/`respx`/`requests_mock`/"
         "`aioresponses` for the client library in use, or a `pytest-httpserver`/"
@@ -212,20 +301,34 @@ class UnmockedNetworkCall(Rule):
     def check(self, ctx: FileContext) -> Iterable[Finding]:
         if _has_mock_signals(ctx):
             return
+
+        local_session_vars = _local_session_vars(ctx.tree)
+        session_matches = _session_call_matches(ctx.tree, local_session_vars)
+        consumed_ctor_ids = {id(ctor_call) for _c, _k, _m, ctor_call in session_matches}
+
+        for call_node, kind, method, _ctor_call in session_matches:
+            yield self.finding(
+                ctx,
+                call_node,
+                f"`.{method}(...)` on a `{kind}` session/client object hits the "
+                "network directly; no mocking signal found in this file",
+            )
+
         for node in ast.walk(ctx.tree):
             if not isinstance(node, ast.Call):
                 continue
             if _is_localhost_call(node):
                 continue
             if isinstance(node.func, ast.Name) and node.func.id == "urlopen":
-                confirmed = _imports_urlopen(ctx.tree)
                 yield self.finding(
                     ctx,
                     node,
                     "`urlopen(...)` hits the network directly; no mocking signal "
                     "found in this file",
-                    confidence=None if confirmed else Confidence.MEDIUM,
                 )
+                continue
+            if id(node) in consumed_ctor_ids:
+                # superseded by a stronger chained/tracked call finding above
                 continue
             dotted = _dotted(node.func)
             if dotted is None:
@@ -246,5 +349,4 @@ class UnmockedNetworkCall(Rule):
                     f"`{dotted}(...)` constructs a live network client with no "
                     "mocking signal found in this file; flagged as construction "
                     "only, not a confirmed request",
-                    confidence=Confidence.MEDIUM,
                 )

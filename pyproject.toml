@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flakehound"
+version = "0.1.0"
+description = "Hunt flaky tests before they bite: static flaky-pattern detection + local run-history scoring for pytest, with ML-testing awareness (JAX/PyTorch/NumPy)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Rahul Kumar", email = "pctablet505@gmail.com" }]
+keywords = [
+    "pytest", "flaky", "flaky-tests", "testing", "ci", "test-reliability",
+    "static-analysis", "machine-learning", "jax", "pytorch", "numpy",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "pytest>=7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+    "pyright>=1.1.350",
+    "pytest-randomly>=3.15",
+    "pytest-xdist>=3.5",
+    "pytest-rerunfailures>=14.0",
+    "coverage>=7.4",
+    "pre-commit>=3.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/pctablet505/flakehound"
+Repository = "https://github.com/pctablet505/flakehound"
+Issues = "https://github.com/pctablet505/flakehound/issues"
+
+[project.scripts]
+flakehound = "flakehound.cli:main"
+
+[project.entry-points.pytest11]
+flakehound = "flakehound.plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "T201"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T201"]
+"tests/fixtures/**" = ["ALL"]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "basic"
+pythonVersion = "3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+norecursedirs = ["tests/fixtures"]
+
+[tool.flakehound]
+# flakehound's own config (dogfood). All rules on by default.
+# disable = ["G3"]
+# fail_on = "high"        # high | medium | advisory | never
+# exclude = ["tests/fixtures/*"]

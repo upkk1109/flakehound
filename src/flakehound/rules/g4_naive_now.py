@@ -6,6 +6,12 @@ was derived from one of these calls) depends on the value read, the test's
 outcome now depends on *when* it happened to run — slow CI hosts, DST
 transitions, and midnight/month/year boundaries all become sources of
 flakiness. The fix is a frozen or injected clock, not a faster runner.
+
+Overlaps ruff's flake8-datetimez (DTZ003 `utcnow`, DTZ005 `now`, DTZ011
+`date.today`), but the framing differs: DTZ flags any naive construction,
+unconditionally, because it is a timezone-correctness bug regardless of how
+the value is used. G4 only fires when the clock read flows into an assertion
+-- it is a flakiness rule, not a silent DTZ duplicate.
 """
 
 from __future__ import annotations

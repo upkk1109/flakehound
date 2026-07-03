@@ -9,6 +9,12 @@ subdirectory/file name; a killed previous run can also leave stale state that
 pollutes a later "file does not exist yet" assertion. `tmp_path` (or
 `tmp_path_factory`) gives every test its own directory, cleaned up
 automatically, and removes the whole failure class.
+
+Overlaps bandit's S108 (hardcoded_tmp_directory), but the framing differs:
+S108 is a security check (predictable shared paths as a symlink-attack/
+tamper vector) and isn't in ruff's default select. G9 is about per-test
+isolation -- collisions under xdist/randomly -- and also covers
+`tempfile.mktemp()` and relative write paths that S108 doesn't.
 """
 
 from __future__ import annotations

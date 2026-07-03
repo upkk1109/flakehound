@@ -32,6 +32,7 @@ def is_test_path(path: Path) -> bool:
 
 
 def iter_test_files(roots: list[Path], exclude: tuple[str, ...]) -> list[Path]:
+    resolved_roots = [root.resolve() for root in roots]
     seen: set[Path] = set()
     out: list[Path] = []
     for root in roots:
@@ -40,8 +41,9 @@ def iter_test_files(roots: list[Path], exclude: tuple[str, ...]) -> list[Path]:
             rp = p.resolve()
             if rp in seen or not is_test_path(p):
                 continue
-            posix = p.as_posix()
-            if any(fnmatch.fnmatch(posix, pat) or fnmatch.fnmatch(str(p), pat) for pat in exclude):
+            if not any(rp == rr or rr in rp.parents for rr in resolved_roots):
+                continue  # resolved path escapes every requested root (symlink traversal)
+            if any(fnmatch.fnmatch(p.as_posix(), pat) for pat in exclude):
                 continue
             seen.add(rp)
             out.append(p)
